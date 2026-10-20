@@ -102,11 +102,17 @@ Running 3000 concurrent 'slow calls' as Fibers -- Thread.new would have crashed 
 
 ### 6. [`06_fiber_has_no_preemption.rb`](06_fiber_has_no_preemption.rb)
 
-Cooperative scheduling has no preemption. A CPU-bound fiber with no yield point starves a ready-in-0.1s I/O fiber for its entire 2s run.
+Cooperative scheduling has no preemption. A CPU-bound fiber with no yield point starves a ready-in-0.1s I/O fiber for its entire 2s run — and at scale, one bad fiber among 3,000 well-behaved ones drags the whole batch down with it, not just its immediate neighbor.
 
 ```
 [CPU-bound fiber] finished after 2.0s
 [I/O fiber]        finished after 2.1s (expected ~0.1s if it weren't starved)
+
+Baseline: 3000 I/O fibers alone -> 1.1s
+With ONE CPU-bound fiber mixed in -> 3.08s
+  fastest of the 3000 I/O fibers finished at: 3.0s (would be ~1.0s without the culprit)
+  slowest of the 3000 I/O fibers finished at: 3.08s
+  all 3000 I/O fibers were held back by the single CPU-bound one -- not just its immediate neighbor.
 ```
 
 ### 7. [`07_ractor_basics.rb`](07_ractor_basics.rb)

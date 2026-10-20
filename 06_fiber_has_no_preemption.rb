@@ -11,6 +11,7 @@
 # would wait forever too -- there's no timeout to rescue it.)
 
 require "async"
+require "benchmark"
 
 def busy_loop(seconds)
   deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + seconds
@@ -33,3 +34,40 @@ Async do |task|
     puts "[I/O fiber]        finished after #{elapsed.call}s (expected ~0.1s if it weren't starved)"
   end
 end
+
+# SAME FINDING, AT A LARGER SCALE.
+#
+# The single I/O fiber above proves the mechanism. This proves the blast
+# radius: one bad fiber doesn't just starve its one neighbor -- mixed in
+# among thousands of well-behaved fibers, it holds back *all* of them for
+# its entire run. None of the others get to finish early, because none of
+# them even get a turn to start their own wait until the culprit is done.
+
+N = 3_000
+
+baseline = Benchmark.realtime do
+  Async do |task|
+    N.times { task.async { sleep 1 } }
+  end
+end
+puts
+puts "Baseline: #{N} I/O fibers alone -> #{baseline.round(2)}s"
+
+finish_times = []
+start2 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+with_culprit = Benchmark.realtime do
+  Async do |task|
+    task.async { busy_loop(2) } # the one bad fiber -- zero yield points
+
+    N.times do
+      task.async do
+        sleep 1
+        finish_times << (Process.clock_gettime(Process::CLOCK_MONOTONIC) - start2)
+      end
+    end
+  end
+end
+puts "With ONE CPU-bound fiber mixed in -> #{with_culprit.round(2)}s"
+puts "  fastest of the #{N} I/O fibers finished at: #{finish_times.min.round(2)}s (would be ~1.0s without the culprit)"
+puts "  slowest of the #{N} I/O fibers finished at: #{finish_times.max.round(2)}s"
+puts "  all #{finish_times.size} I/O fibers were held back by the single CPU-bound one -- not just its immediate neighbor."
